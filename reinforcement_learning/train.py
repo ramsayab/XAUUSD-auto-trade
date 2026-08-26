@@ -1,14 +1,3 @@
-"""
-train.py
-Script utama: load data XAUUSD -> feature engineering -> train PPO -> backtest.
-
-Cara pakai:
-    python train.py
-
-Pastikan file data ada di: data/XAUUSD.csv
-Format kolom: Date,Open,High,Low,Close,Volume
-"""
-
 import pandas as pd
 import matplotlib.pyplot as plt
 from stable_baselines3 import PPO
@@ -17,8 +6,11 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from features import add_features
 from trading_env import SimpleTradingEnv
 
+from collections import Counter
+actions_taken = []
 
-DATA_PATH = "data/XAUUSD_2023-2026.csv"
+
+DATA_PATH = "data/XAUUSD_2004-2022.csv"
 WINDOW_SIZE = 20
 TRAIN_RATIO = 0.8
 TOTAL_TIMESTEPS = 50_000  # naikkan (misal 200_000+) untuk hasil lebih matang
@@ -44,7 +36,7 @@ def main():
     print(f"Train: {len(train_df)} baris | Test: {len(test_df)} baris")
 
     # 3. Buat environment training
-    train_env = DummyVecEnv([lambda: SimpleTradingEnv(train_df, window_size=WINDOW_SIZE)])
+    train_env = DummyVecEnv([lambda: SimpleTradingEnv(train_df, window_size=WINDOW_SIZE, decision_interval=60)])
 
     # 4. Training PPO
     print("Training PPO...")
@@ -56,6 +48,7 @@ def main():
         n_steps=2048,
         batch_size=64,
         gamma=0.99,
+        device='cpu'
     )
     model.learn(total_timesteps=TOTAL_TIMESTEPS)
     model.save("ppo_xauusd_simple")
@@ -69,8 +62,11 @@ def main():
 
     while not done:
         action, _ = model.predict(obs, deterministic=True)
+        actions_taken.append(int(action))
         obs, reward, terminated, truncated, info = test_env.step(int(action))
         done = terminated or truncated
+
+    print(Counter(actions_taken))
 
     # 6. Hasil & plot equity curve
     equity = test_env.equity_curve

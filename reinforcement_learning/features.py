@@ -1,8 +1,3 @@
-"""
-features.py
-Feature engineering sederhana & causal (hanya pakai data masa lalu).
-"""
-
 import pandas as pd
 import numpy as np
 
