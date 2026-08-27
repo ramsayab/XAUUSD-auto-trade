@@ -1,129 +1,223 @@
-import numpy as np
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
 import gymnasium as gym
+import numpy as np
+import pandas as pd
 from gymnasium import spaces
 
 
-class SimpleTradingEnv(gym.Env):
-    metadata = {"render_modes": ["human"]}
+@dataclass
+class Position:
+    direction: int = 0
+    entry_price: float = 0.0
+    sl: float = 0.0
+    tp: float = 0.0
+    units: float = 0.0
+    risk_cash: float = 0.0
+    sl_distance: float = 0.0
+    tp_r: float = 0.0
+    sl_atr_mult: float = 0.0
+    bars_in_trade: int = 0
+    entry_time: Optional[pd.Timestamp] = None
 
-    def __init__(self, df, window_size=20, initial_balance=10_000,
-                 transaction_cost=0.0002, decision_interval=60):
+
+class BracketTradingEnv(gym.Env):
+    metadata = {"render_modes": []}
+
+    def __init__(
+        self, decision_df, execution_df, feature_cols,
+        sl_atr_multipliers=(1.0, 1.5, 2.0),
+        tp_r_multipliers=(1.0, 1.5, 2.0, 3.0),
+        initial_equity=1_000.0, position_size_lots=0.01,
+        contract_size=100.0, spread_price=0.20, slippage_price=0.02,
+        commission_per_trade=0.0, holding_penalty=0.00002,
+        reward_mtm_weight=0.01, max_episode_steps=None, randomize_start=False,
+    ):
         super().__init__()
+        self.decision_df = decision_df.dropna(subset=feature_cols + ["atr"]).copy()
+        self.execution_df = execution_df.sort_index().copy()
+        self.feature_cols = list(feature_cols)
+        self.sl_atr_multipliers = tuple(sl_atr_multipliers)
+        self.tp_r_multipliers = tuple(tp_r_multipliers)
+        self.initial_equity = float(initial_equity)
+        self.position_size_lots = float(position_size_lots)
+        self.contract_size = float(contract_size)
+        self.units = self.position_size_lots * self.contract_size
+        self.spread_price = float(spread_price)
+        self.slippage_price = float(slippage_price)
+        self.commission_per_trade = float(commission_per_trade)
+        self.holding_penalty = float(holding_penalty)
+        self.reward_mtm_weight = float(reward_mtm_weight)
+        self.max_episode_steps = max_episode_steps or max(len(self.decision_df) - 2, 1)
+        self.randomize_start = randomize_start
 
-        self.df = df.reset_index(drop=True)
-        self.window_size = window_size
-        self.initial_balance = initial_balance
-        self.transaction_cost = transaction_cost
+        if self.position_size_lots <= 0 or self.contract_size <= 0:
+            raise ValueError("position_size_lots and contract_size must be positive")
+        if len(self.decision_df) < 3:
+            raise ValueError("decision_df must contain at least three decision bars")
 
-        # decision_interval=60 -> 1 Hour
-        self.decision_interval = decision_interval
-
-        self.feature_cols = [c for c in df.columns if c != "Date"]
-
-        n_features = len(self.feature_cols)
-        obs_dim = window_size * n_features + 1
+        self._execution_high = self.execution_df["High"].to_numpy(dtype=np.float64)
+        self._execution_low = self.execution_df["Low"].to_numpy(dtype=np.float64)
+        self._execution_index = self.execution_df.index
+        self.action_space = spaces.MultiDiscrete([
+            3, len(self.sl_atr_multipliers), len(self.tp_r_multipliers)
+        ])
+        self.n_position_features = 6
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32
+            low=-np.inf, high=np.inf,
+            shape=(len(self.feature_cols) + self.n_position_features,),
+            dtype=np.float32,
         )
-        self.action_space = spaces.Discrete(3)  # 0=hold, 1=buy, 2=sell
+        self.reset()
 
-        self._reset_state()
-
-    def _reset_state(self):
-        self.current_step = self.window_size
-        self.balance = self.initial_balance
-        self.position = 0
-        self.entry_price = 0.0
-        self.equity_curve = [float(self.initial_balance)]
-
-    def reset(self, seed: int | None = None, options: dict | None = None):
+    def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        self._reset_state()
-        return self._get_obs(), {}
+        if self.randomize_start:
+            max_start = max(len(self.decision_df) - self.max_episode_steps - 1, 1)
+            self.i = int(self.np_random.integers(0, max_start))
+        else:
+            self.i = 0
+        self.steps = 0
+        self.equity = self.initial_equity
+        self.position = Position()
+        self.history = []
+        self.trades = []
+        return self._observation(), {}
 
-    def _get_obs(self):
-        window = self.df.loc[
-            self.current_step - self.window_size: self.current_step - 1,
-            self.feature_cols,
-        ].values.astype(np.float32).flatten()
-        obs = np.concatenate([window, [float(self.position)]])
-        return obs
+    def _row(self):
+        return self.decision_df.iloc[self.i]
 
-    def _current_price(self):
-        return float(self.df.loc[self.current_step, "Close"])
+    def _time(self):
+        return self.decision_df.index[self.i]
 
-    def _compute_equity(self, price):
-        if self.position == 0:
-            return self.balance
-        unrealized_pct = (price - self.entry_price) / self.entry_price * self.position
-        return self.balance * (1 + unrealized_pct)
+    def _next_time(self):
+        return self.decision_df.index[min(self.i + 1, len(self.decision_df) - 1)]
 
-    def _apply_action(self, action, price):
-        """Eksekusi keputusan agent (buka/tutup posisi). Dipanggil SEKALI per blok keputusan."""
-        if action == 1:  # BUY
-            if self.position == -1:
-                self._close_position(price)
-            if self.position == 0:
-                self.position = 1
-                self.entry_price = price
-                self.balance -= self.balance * self.transaction_cost
+    def _observation(self):
+        row = self._row()
+        close = float(row["Close"])
+        atr = max(float(row["atr"]), 1e-12)
+        p = self.position
+        if p.direction == 0:
+            position_state = np.zeros(6, dtype=np.float32)
+        else:
+            unrealized = (close - p.entry_price) * p.units * p.direction
+            position_state = np.array([
+                p.direction, unrealized / max(p.risk_cash, 1e-12),
+                min(p.bars_in_trade / 100.0, 10.0),
+                ((p.tp - close) * p.direction) / atr,
+                ((close - p.sl) * p.direction) / atr, p.tp_r,
+            ], dtype=np.float32)
+        market = row[self.feature_cols].astype(float).to_numpy(dtype=np.float32)
+        return np.nan_to_num(np.concatenate([market, position_state]), nan=0.0, posinf=10.0, neginf=-10.0)
 
-        elif action == 2:  # SELL
-            if self.position == 1:
-                self._close_position(price)
-            if self.position == 0:
-                self.position = -1
-                self.entry_price = price
-                self.balance -= self.balance * self.transaction_cost
-        # action == 0 (HOLD) -> tidak melakukan apa-apa
+    def _entry_price(self, close, direction):
+        return close + direction * (self.spread_price / 2 + self.slippage_price)
 
-    def step(self, action):
-        equity_before = self._compute_equity(self._current_price())
+    def _exit_price(self, price, direction):
+        return price - direction * (self.spread_price / 2 + self.slippage_price)
 
-        # === 1. Terapkan keputusan agent SEKALI di awal blok ===
-        self._apply_action(action, self._current_price())
+    def _open_position(self, direction, sl_idx, tp_idx):
+        row = self._row()
+        entry = self._entry_price(float(row["Close"]), direction)
+        sl_distance = max(self.sl_atr_multipliers[sl_idx] * float(row["atr"]), 1e-8)
+        tp_r = self.tp_r_multipliers[tp_idx]
+        self.position = Position(
+            direction=direction, entry_price=entry,
+            sl=entry - direction * sl_distance,
+            tp=entry + direction * tp_r * sl_distance,
+            units=self.units, risk_cash=self.units * sl_distance,
+            sl_distance=sl_distance, tp_r=tp_r,
+            sl_atr_mult=self.sl_atr_multipliers[sl_idx], entry_time=self._time(),
+        )
 
-        terminated = False
-        for _ in range(self.decision_interval):
-            self.current_step += 1
-            if self.current_step >= len(self.df) - 1:
-                terminated = True
+    def _close_position(self, raw_price, reason):
+        p = self.position
+        if p.direction == 0:
+            return
+        exit_price = self._exit_price(raw_price, p.direction)
+        pnl = (exit_price - p.entry_price) * p.units * p.direction
+        pnl -= self.commission_per_trade
+        self.equity += pnl
+        self.trades.append({
+            "entry_time": p.entry_time, "exit_time": self._time(),
+            "direction": p.direction, "entry_price": p.entry_price,
+            "exit_price": exit_price, "units": p.units,
+            "lots": self.position_size_lots, "pnl": pnl, "exit_reason": reason,
+        })
+        self.position = Position()
+
+    def _simulate_execution(self):
+        if self.position.direction == 0:
+            return
+        lo = int(self._execution_index.searchsorted(self._time(), side="right"))
+        hi = int(self._execution_index.searchsorted(self._next_time(), side="right"))
+        for idx in range(lo, hi):
+            p = self.position
+            if p.direction == 0:
+                break
+            sl_hit = self._execution_low[idx] <= p.sl if p.direction == 1 else self._execution_high[idx] >= p.sl
+            tp_hit = self._execution_high[idx] >= p.tp if p.direction == 1 else self._execution_low[idx] <= p.tp
+            if sl_hit:
+                self._close_position(p.sl, "SL")
+                break
+            if tp_hit:
+                self._close_position(p.tp, "TP")
                 break
 
-        price = self._current_price()
+    def step(self, action):
+        direction_raw, sl_idx, tp_idx = np.asarray(action, dtype=int)
+        desired_direction = {0: 0, 1: 1, 2: -1}[int(direction_raw)]
+        previous_equity = self.equity
+        close = float(self._row()["Close"])
 
-        # Tutup posisi otomatis kalau episode berakhir
-        if terminated and self.position != 0:
-            self._close_position(price)
+        if self.position.direction != 0:
+            if desired_direction == 0:
+                self._close_position(close, "manual_close")
+            elif desired_direction != self.position.direction:
+                self._close_position(close, "flip_close")
+                self._open_position(desired_direction, int(sl_idx), int(tp_idx))
+        elif desired_direction != 0:
+            self._open_position(desired_direction, int(sl_idx), int(tp_idx))
 
-        current_equity = self._compute_equity(price)
-
-        # Reward = perubahan equity relatif selama satu blok keputusan ini
-        # (mencakup transaction cost + PnL realized/unrealized, sekali hitung)
-        reward = (current_equity / equity_before) - 1.0
-
-        self.equity_curve.append(current_equity)
-
-        if not terminated:
-            obs = self._get_obs()
+        self._simulate_execution()
+        if self.position.direction != 0:
+            self.position.bars_in_trade += 1
+            unrealized = (close - self.position.entry_price) * self.units * self.position.direction
         else:
-            obs_shape = self.observation_space.shape
-            assert obs_shape is not None
-            obs = np.zeros(obs_shape, dtype=np.float32)
+            unrealized = 0.0
 
-        truncated = False
-        info = {"balance": self.balance, "position": self.position, "price": price}
+        reward_unit = max(previous_equity * 0.005, 1e-12)
+        reward = (self.equity - previous_equity) / reward_unit
+        if self.position.direction != 0:
+            reward += unrealized / max(self.position.risk_cash, 1e-12) * self.reward_mtm_weight
+            reward -= self.holding_penalty
 
-        return obs, float(reward), terminated, truncated, info
+        self.history.append({"time": self._time(), "equity": self.equity,
+                             "position": self.position.direction, "close": close,
+                             "reward": reward})
+        self.i += 1
+        self.steps += 1
+        terminated = self.i >= len(self.decision_df) - 2
+        truncated = self.steps >= self.max_episode_steps
+        if terminated or truncated:
+            if self.position.direction != 0:
+                self._close_position(float(self.decision_df.iloc[self.i]["Close"]), "episode_end")
+            observation_shape = self.observation_space.shape
+            assert observation_shape is not None
+            observation = np.zeros(observation_shape, dtype=np.float32)
+        else:
+            observation = self._observation()
+        return observation, float(reward), terminated, truncated, {
+            "equity": self.equity, "position": self.position.direction,
+            "n_trades": len(self.trades),
+        }
 
-    def _close_position(self, price):
-        """Realisasi PnL saat menutup posisi. Update balance langsung."""
-        pnl_pct = (price - self.entry_price) / self.entry_price * self.position
-        self.balance += self.balance * pnl_pct
-        self.balance -= self.balance * self.transaction_cost
-        self.position = 0
-        self.entry_price = 0.0
+    def equity_curve(self):
+        return pd.DataFrame(self.history)
 
-    def render(self):
-        print(f"Step {self.current_step} | Balance: {self.balance:.2f} | "
-              f"Position: {self.position}")
+    def trade_log(self):
+        return pd.DataFrame(self.trades)
