@@ -31,8 +31,8 @@ class BracketTradingEnv(gym.Env):
         self, decision_df, execution_df, feature_cols,
         sl_atr_multipliers=(1.0, 1.5, 2.0),
         tp_r_multipliers=(1.0, 1.5, 2.0, 3.0),
-        initial_equity=1_000.0, position_size_lots=0.01,
-        contract_size=100.0, spread_price=0.20, slippage_price=0.02,
+        initial_equity=10_000.0, risk_fraction=0.005,
+        spread_price=0.20, slippage_price=0.02,
         commission_per_trade=0.0, holding_penalty=0.00002,
         reward_mtm_weight=0.01, max_episode_steps=None, randomize_start=False,
     ):
@@ -43,9 +43,7 @@ class BracketTradingEnv(gym.Env):
         self.sl_atr_multipliers = tuple(sl_atr_multipliers)
         self.tp_r_multipliers = tuple(tp_r_multipliers)
         self.initial_equity = float(initial_equity)
-        self.position_size_lots = float(position_size_lots)
-        self.contract_size = float(contract_size)
-        self.units = self.position_size_lots * self.contract_size
+        self.risk_fraction = float(risk_fraction)
         self.spread_price = float(spread_price)
         self.slippage_price = float(slippage_price)
         self.commission_per_trade = float(commission_per_trade)
@@ -54,8 +52,8 @@ class BracketTradingEnv(gym.Env):
         self.max_episode_steps = max_episode_steps or max(len(self.decision_df) - 2, 1)
         self.randomize_start = randomize_start
 
-        if self.position_size_lots <= 0 or self.contract_size <= 0:
-            raise ValueError("position_size_lots and contract_size must be positive")
+        if self.risk_fraction <= 0:
+            raise ValueError("risk_fraction must be positive")
         if len(self.decision_df) < 3:
             raise ValueError("decision_df must contain at least three decision bars")
 
@@ -125,11 +123,13 @@ class BracketTradingEnv(gym.Env):
         entry = self._entry_price(float(row["Close"]), direction)
         sl_distance = max(self.sl_atr_multipliers[sl_idx] * float(row["atr"]), 1e-8)
         tp_r = self.tp_r_multipliers[tp_idx]
+        risk_cash = max(self.equity * self.risk_fraction, 1e-8)
+        units = risk_cash / sl_distance
         self.position = Position(
             direction=direction, entry_price=entry,
             sl=entry - direction * sl_distance,
             tp=entry + direction * tp_r * sl_distance,
-            units=self.units, risk_cash=self.units * sl_distance,
+            units=units, risk_cash=risk_cash,
             sl_distance=sl_distance, tp_r=tp_r,
             sl_atr_mult=self.sl_atr_multipliers[sl_idx], entry_time=self._time(),
         )
@@ -146,7 +146,9 @@ class BracketTradingEnv(gym.Env):
             "entry_time": p.entry_time, "exit_time": self._time(),
             "direction": p.direction, "entry_price": p.entry_price,
             "exit_price": exit_price, "units": p.units,
-            "lots": self.position_size_lots, "pnl": pnl, "exit_reason": reason,
+            "risk_cash": p.risk_cash,
+            "r_mult": pnl / max(p.risk_cash, 1e-12),
+            "pnl": pnl, "exit_reason": reason,
         })
         self.position = Position()
 
@@ -186,11 +188,11 @@ class BracketTradingEnv(gym.Env):
         self._simulate_execution()
         if self.position.direction != 0:
             self.position.bars_in_trade += 1
-            unrealized = (close - self.position.entry_price) * self.units * self.position.direction
+            unrealized = (close - self.position.entry_price) * self.position.units * self.position.direction
         else:
             unrealized = 0.0
 
-        reward_unit = max(previous_equity * 0.005, 1e-12)
+        reward_unit = max(previous_equity * self.risk_fraction, 1e-12)
         reward = (self.equity - previous_equity) / reward_unit
         if self.position.direction != 0:
             reward += unrealized / max(self.position.risk_cash, 1e-12) * self.reward_mtm_weight

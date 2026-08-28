@@ -14,12 +14,12 @@ from trading_env import BracketTradingEnv
 
 
 DATA_PATH = ["data/XAUUSD_2004-2022.csv", "data/XAUUSD_2023-2026.csv"]
-DECISION_TIMEFRAME = "H1"
-POSITION_SIZE_LOTS = 0.01
-CONTRACT_SIZE = 100.0
+DECISION_TIMEFRAME = "1h"
+RISK_FRACTION = 0.005
 TRAIN_FRACTION = 0.8
-TOTAL_TIMESTEPS = 500_000
+TOTAL_TIMESTEPS = 1_000_000
 EPISODE_STEPS = 2_048
+INITIAL_EQUITY = 10_000
 
 
 def load_data(path):
@@ -46,9 +46,9 @@ def make_env(decision_df, execution_df, feature_cols, randomize_start=False):
         decision_df=decision_df,
         execution_df=execution_df,
         feature_cols=feature_cols,
-        position_size_lots=POSITION_SIZE_LOTS,
-        contract_size=CONTRACT_SIZE,
+        risk_fraction=RISK_FRACTION,
         randomize_start=randomize_start,
+        initial_equity=INITIAL_EQUITY,
         max_episode_steps=EPISODE_STEPS if randomize_start else None,
     ))
 
@@ -112,7 +112,7 @@ def main():
     train_exec = slice_execution(train_execution, train_df)
     val_exec = slice_execution(train_execution, val_df)
     print(f"Train: {len(train_df):,} | Validation: {len(val_df):,} | Test: {len(test_features):,}")
-    print(f"Features: {len(feature_cols)} | Fixed size: {POSITION_SIZE_LOTS} lot ({POSITION_SIZE_LOTS * CONTRACT_SIZE:g} units)")
+    print(f"Features: {len(feature_cols)} | Risk per trade: {RISK_FRACTION:.2%} of equity")
 
     train_raw = make_env(train_df, train_exec, feature_cols, randomize_start=True)
     train_vec = VecNormalize(
@@ -122,23 +122,23 @@ def main():
 
     print("Training PPO...")
     model = PPO(
-        "MlpPolicy", train_vec, device="cpu", verbose=1, seed=42,
+        "MlpPolicy", train_vec, device="cuda", verbose=1, seed=42,
         learning_rate=6e-5, gamma=0.99, gae_lambda=0.95,
         clip_range=0.1, ent_coef=0.03, n_steps=EPISODE_STEPS,
-        batch_size=256, n_epochs=5, target_kl=0.025,
+        batch_size=512, n_epochs=5, target_kl=0.025,
         policy_kwargs={
             "net_arch": [128, 64],
             "optimizer_kwargs": {"weight_decay": 1e-5},
         },
     )
     model.learn(total_timesteps=TOTAL_TIMESTEPS)
-    model.save("ppo_xauusd")
-    train_vec.save("ppo_xauusd_vecnorm.pkl")
+    model.save("model/ppo_xauusd")
+    train_vec.save("model/ppo_xauusd_vecnorm.pkl")
 
     print("Evaluating the training split...")
     train_eval_raw = CaptureEpisode(BracketTradingEnv(
         train_df, train_exec, feature_cols,
-        position_size_lots=POSITION_SIZE_LOTS, contract_size=CONTRACT_SIZE,
+        risk_fraction=RISK_FRACTION,
     ))
     train_eval_vec = VecNormalize(
         DummyVecEnv([lambda: train_eval_raw]),
@@ -152,7 +152,7 @@ def main():
     print("Backtesting on the unseen test set...")
     test_raw = CaptureEpisode(BracketTradingEnv(
         test_features, test_execution, feature_cols,
-        position_size_lots=POSITION_SIZE_LOTS, contract_size=CONTRACT_SIZE,
+        risk_fraction=RISK_FRACTION,
     ))
     test_vec = VecNormalize(
         DummyVecEnv([lambda: Monitor(test_raw)]),
@@ -162,7 +162,6 @@ def main():
     log_df, test_equity, test_trades, test_balance = run_backtest(
         model, test_vec, test_raw
     )
-    log_df.to_csv("xauusd_decisions.csv", index=False)
 
     plt.figure(figsize=(16, 6))
     plt.plot(log_df["index"], log_df["price"], color="black", linewidth=1)
@@ -185,12 +184,11 @@ def main():
         if equity.empty or final_balance is None:
             print(f"{label} final balance: unavailable (no completed episode)")
             continue
-        total_return = (float(final_balance) / 10_000.0 - 1) * 100
+        total_return = (float(final_balance) / float(INITIAL_EQUITY) - 1) * 100
         print(
             f"{label} final balance: {float(final_balance):.2f} | "
             f"Return: {total_return:.2f}% | Trades: {len(trades)}"
         )
-
 
 if __name__ == "__main__":
     main()
