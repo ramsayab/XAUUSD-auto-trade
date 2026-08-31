@@ -14,7 +14,7 @@ from trading_env import BracketTradingEnv
 
 
 DATA_PATH = ["data/XAUUSD_2004-2022.csv", "data/XAUUSD_2023-2026.csv"]
-DECISION_TIMEFRAME = "1h"
+DECISION_TIMEFRAME = "15min"
 RISK_FRACTION = 0.005
 TRAIN_FRACTION = 0.8
 TOTAL_TIMESTEPS = 1_000_000
@@ -122,12 +122,12 @@ def main():
 
     print("Training PPO...")
     model = PPO(
-        "MlpPolicy", train_vec, device="cuda", verbose=1, seed=42,
+        "MlpPolicy", train_vec, device="cpu", verbose=1, seed=42,
         learning_rate=6e-5, gamma=0.99, gae_lambda=0.95,
-        clip_range=0.1, ent_coef=0.03, n_steps=EPISODE_STEPS,
-        batch_size=512, n_epochs=5, target_kl=0.025,
+        clip_range=0.1, ent_coef=0.02, n_steps=EPISODE_STEPS,
+        batch_size=1024, n_epochs=5, target_kl=0.025,
         policy_kwargs={
-            "net_arch": [128, 64],
+            "net_arch": [256, 128],
             "optimizer_kwargs": {"weight_decay": 1e-5},
         },
     )
@@ -175,6 +175,179 @@ def main():
     plt.legend()
     plt.tight_layout()
     plt.savefig("xauusd_decisions.png", dpi=150)
+    plt.close()
+
+    # Plot training equity history with legend for trade counts
+    if not train_equity.empty:
+        if not train_trades.empty and "direction" in train_trades.columns:
+            train_long = len(train_trades[train_trades["direction"] == 1])
+            train_short = len(train_trades[train_trades["direction"] == -1])
+        else:
+            train_long = 0
+            train_short = 0
+        plt.figure(figsize=(12, 6))
+        plt.plot(
+            train_equity["time"] if "time" in train_equity.columns else train_equity.index, 
+            train_equity["equity"], 
+            color="blue", 
+            linewidth=1.5,
+            label=f"Equity (Long Trades: {train_long}, Short Trades: {train_short})"
+        )
+        plt.title("PPO Training Equity Curve")
+        plt.xlabel("Date / Time" if "time" in train_equity.columns else "Steps")
+        plt.ylabel("Equity ($)")
+        plt.grid(True, linestyle="--", alpha=0.5)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig("train_equity.png", dpi=150)
+        plt.close()
+
+    # Plot testing equity history with legend for trade counts
+    if not test_equity.empty:
+        if not test_trades.empty and "direction" in test_trades.columns:
+            test_long = len(test_trades[test_trades["direction"] == 1])
+            test_short = len(test_trades[test_trades["direction"] == -1])
+        else:
+            test_long = 0
+            test_short = 0
+        plt.figure(figsize=(12, 6))
+        plt.plot(
+            test_equity["time"] if "time" in test_equity.columns else test_equity.index, 
+            test_equity["equity"], 
+            color="green", 
+            linewidth=1.5,
+            label=f"Equity (Long Trades: {test_long}, Short Trades: {test_short})"
+        )
+        plt.title("PPO Testing Equity Curve")
+        plt.xlabel("Date / Time" if "time" in test_equity.columns else "Steps")
+        plt.ylabel("Equity ($)")
+        plt.grid(True, linestyle="--", alpha=0.5)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig("test_equity.png", dpi=150)
+        plt.close()
+
+    # Plot trade holding durations distribution
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Train Durations Distribution
+    if not train_trades.empty and "entry_time" in train_trades.columns:
+        train_durations = (pd.to_datetime(train_trades["exit_time"]) - pd.to_datetime(train_trades["entry_time"])).dt.total_seconds() / 3600.0
+        axes[0].hist(train_durations, bins=30, color="royalblue", alpha=0.7, edgecolor="black")
+        axes[0].set_title(f"Train Trade Durations (N={len(train_trades)})")
+        axes[0].set_xlabel("Holding Time (Hours)")
+        axes[0].set_ylabel("Count")
+        axes[0].grid(True, linestyle="--", alpha=0.5)
+        # Add stats lines
+        mean_val = train_durations.mean()
+        median_val = train_durations.median()
+        axes[0].axvline(mean_val, color="red", linestyle="dashed", linewidth=1.5, label=f"Mean: {mean_val:.1f}h")
+        axes[0].axvline(median_val, color="purple", linestyle="dashed", linewidth=1.5, label=f"Median: {median_val:.1f}h")
+        axes[0].legend()
+    else:
+        axes[0].text(0.5, 0.5, "No Train Trades", ha="center", va="center")
+        
+    # Test Durations Distribution
+    if not test_trades.empty and "entry_time" in test_trades.columns:
+        test_durations = (pd.to_datetime(test_trades["exit_time"]) - pd.to_datetime(test_trades["entry_time"])).dt.total_seconds() / 3600.0
+        axes[1].hist(test_durations, bins=30, color="seagreen", alpha=0.7, edgecolor="black")
+        axes[1].set_title(f"Test Trade Durations (N={len(test_trades)})")
+        axes[1].set_xlabel("Holding Time (Hours)")
+        axes[1].set_ylabel("Count")
+        axes[1].grid(True, linestyle="--", alpha=0.5)
+        # Add stats lines
+        mean_val = test_durations.mean()
+        median_val = test_durations.median()
+        axes[1].axvline(mean_val, color="red", linestyle="dashed", linewidth=1.5, label=f"Mean: {mean_val:.1f}h")
+        axes[1].axvline(median_val, color="purple", linestyle="dashed", linewidth=1.5, label=f"Median: {median_val:.1f}h")
+        axes[1].legend()
+    else:
+        axes[1].text(0.5, 0.5, "No Test Trades", ha="center", va="center")
+        
+    plt.suptitle("Distribution of Trade Holding Times (Hours)", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig("trade_durations.png", dpi=150)
+    plt.close()
+
+    # Plot trade durations comparison (Long vs Short)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+    
+    # Train Comparison
+    if not train_trades.empty and "entry_time" in train_trades.columns:
+        train_df_trades = train_trades.copy()
+        train_df_trades["duration_hours"] = (pd.to_datetime(train_df_trades["exit_time"]) - pd.to_datetime(train_df_trades["entry_time"])).dt.total_seconds() / 3600.0
+        
+        long_durations = train_df_trades[train_df_trades["direction"] == 1]["duration_hours"]
+        short_durations = train_df_trades[train_df_trades["direction"] == -1]["duration_hours"]
+        
+        data_to_plot = []
+        labels = []
+        if not long_durations.empty:
+            data_to_plot.append(long_durations)
+            labels.append(f"Long (N={len(long_durations)})")
+        if not short_durations.empty:
+            data_to_plot.append(short_durations)
+            labels.append(f"Short (N={len(short_durations)})")
+            
+        if data_to_plot:
+            bp = axes[0].boxplot(data_to_plot, patch_artist=True, showmeans=True)
+            axes[0].set_xticklabels(labels)
+            colors = ["#1f77b4", "#ff7f0e"] # blue and orange
+            for patch, color in zip(bp["boxes"], colors[:len(data_to_plot)]):
+                patch.set_facecolor(color)
+                patch.set_alpha(0.6)
+            for median in bp["medians"]:
+                median.set(color="red", linewidth=2)
+            for mean in bp["means"]:
+                mean.set(marker="o", markerfacecolor="yellow", markeredgecolor="black", markersize=6)
+            axes[0].set_title("Train: Long vs Short Holding Time")
+            axes[0].set_ylabel("Holding Time (Hours)")
+            axes[0].grid(True, linestyle="--", alpha=0.5)
+        else:
+            axes[0].text(0.5, 0.5, "No Long/Short Trades", ha="center", va="center")
+    else:
+        axes[0].text(0.5, 0.5, "No Train Trades", ha="center", va="center")
+        
+    # Test Comparison
+    if not test_trades.empty and "entry_time" in test_trades.columns:
+        test_df_trades = test_trades.copy()
+        test_df_trades["duration_hours"] = (pd.to_datetime(test_df_trades["exit_time"]) - pd.to_datetime(test_df_trades["entry_time"])).dt.total_seconds() / 3600.0
+        
+        long_durations = test_df_trades[test_df_trades["direction"] == 1]["duration_hours"]
+        short_durations = test_df_trades[test_df_trades["direction"] == -1]["duration_hours"]
+        
+        data_to_plot = []
+        labels = []
+        if not long_durations.empty:
+            data_to_plot.append(long_durations)
+            labels.append(f"Long (N={len(long_durations)})")
+        if not short_durations.empty:
+            data_to_plot.append(short_durations)
+            labels.append(f"Short (N={len(short_durations)})")
+            
+        if data_to_plot:
+            bp = axes[1].boxplot(data_to_plot, patch_artist=True, showmeans=True)
+            axes[1].set_xticklabels(labels)
+            colors = ["#2ca02c", "#d62728"] # green and red
+            for patch, color in zip(bp["boxes"], colors[:len(data_to_plot)]):
+                patch.set_facecolor(color)
+                patch.set_alpha(0.6)
+            for median in bp["medians"]:
+                median.set(color="red", linewidth=2)
+            for mean in bp["means"]:
+                mean.set(marker="o", markerfacecolor="yellow", markeredgecolor="black", markersize=6)
+            axes[1].set_title("Test: Long vs Short Holding Time")
+            axes[1].grid(True, linestyle="--", alpha=0.5)
+        else:
+            axes[1].text(0.5, 0.5, "No Long/Short Trades", ha="center", va="center")
+    else:
+        axes[1].text(0.5, 0.5, "No Test Trades", ha="center", va="center")
+        
+    plt.suptitle("Holding Time Comparison: Long vs Short Trades (Hours)", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig("duration_comparison.png", dpi=150)
+    plt.close()
+
 
     for label, equity, trades in (
         ("Train", train_equity, train_trades),
