@@ -1,122 +1,232 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useCallback, useEffect, useState } from "react";
+import "./App.css";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+const formatNumber = (value, digits = 2) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value)))
+    return "--";
+  return Number(value).toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+};
+
+const formatDate = (value) =>
+  value
+    ? new Date(value).toLocaleString("en-US", {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "--";
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [position, setPosition] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  const loadDashboard = useCallback(async () => {
+    setError("");
+    try {
+      const [positionResponse, historyResponse] = await Promise.all([
+        fetch(`${API_URL}/current_pos`),
+        fetch(`${API_URL}/history_pos`),
+      ]);
+      if (!positionResponse.ok || !historyResponse.ok)
+        throw new Error("API error");
+      setPosition(await positionResponse.json());
+      setHistory(await historyResponse.json());
+      setLastUpdated(new Date());
+    } catch {
+      setError(
+        "Backend belum tersambung. Pastikan FastAPI berjalan di port 8000.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDashboard();
+    const interval = window.setInterval(loadDashboard, 1000);
+    return () => window.clearInterval(interval);
+  }, [loadDashboard]);
+
+  const profit = position?.profit ?? 0;
+  const isLong = position?.order_type === "Long";
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
+    <main className="shell">
+      <section className="intro">
         <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
+          <p className="eyebrow">XAUUSD / H1</p>
+          <h1>Trading overview</h1>
+          <p className="muted">
+            Monitor the model's current exposure and recent closes.
           </p>
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
+        <div className="updated">
+          Last sync{" "}
+          <strong>
+            {lastUpdated ? formatDate(lastUpdated) : "waiting..."}
+          </strong>
         </div>
       </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      {error && <div className="alert">{error}</div>}
+      <section className="stats-grid">
+        <article className="stat-card accent-card">
+          <span>ACCOUNT BALANCE</span>
+          <strong>
+            {position ? `$${formatNumber(position.balance)}` : "--"}
+          </strong>
+          <small>MT5 account</small>
+        </article>
+        <article className="stat-card">
+          <span>OPEN P&amp;L</span>
+          <strong className={profit >= 0 ? "positive" : "negative"}>
+            {position
+              ? `${profit >= 0 ? "+" : ""}$${formatNumber(profit)}`
+              : "--"}
+          </strong>
+          <small>{position ? "Current position" : "No open position"}</small>
+        </article>
+        <article className="stat-card">
+          <span>ACTIVE SIDE</span>
+          <strong>{position?.order_type || "FLAT"}</strong>
+          <small>
+            {position
+              ? `${formatNumber(position.lot)} lot`
+              : "Waiting for signal"}
+          </small>
+        </article>
+      </section>
+      <section className="content-grid">
+        <article className="panel position-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">CURRENT POSITION</p>
+              <h2>{position ? "XAUUSD position" : "No active position"}</h2>
+            </div>
+            {position && (
+              <span className={`side-pill ${isLong ? "long" : "short"}`}>
+                {isLong ? "LONG" : "SHORT"}
+              </span>
+            )}
+          </div>
+          {loading ? (
+            <div className="empty-state">Loading market data...</div>
+          ) : position ? (
+            <div className="position-details">
+              <div className="price-block">
+                <span>UNREALIZED PROFIT</span>
+                <strong className={profit >= 0 ? "positive" : "negative"}>
+                  {profit >= 0 ? "+" : ""}${formatNumber(profit)}
+                </strong>
+              </div>
+              <dl>
+                <div>
+                  <dt>Entry price</dt>
+                  <dd>{formatNumber(position.entry_price)}</dd>
+                </div>
+                <div>
+                  <dt>Current price</dt>
+                  <dd>{formatNumber(position.current_price)}</dd>
+                </div>
+                <div>
+                  <dt>Volume</dt>
+                  <dd>{formatNumber(position.lot)} lot</dd>
+                </div>
+              </dl>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <span className="empty-icon">—</span>
+              <strong>Portfolio is flat</strong>
+              <span>The bot is waiting for its next signal.</span>
+            </div>
+          )}
+        </article>
+        <article className="panel signal-panel">
+          <p className="eyebrow">SYSTEM STATUS</p>
+          <h2>Model execution</h2>
+          <div className="status-row">
+            <span>
+              <i className="status-dot" /> Strategy runner
+            </span>
+            <strong>{error ? "Paused" : "Running"}</strong>
+          </div>
+          <div className="status-row">
+            <span>
+              <i className="status-dot" /> Instrument
+            </span>
+            <strong>XAUUSD</strong>
+          </div>
+          <div className="status-row">
+            <span>
+              <i className="status-dot" /> Refresh rate
+            </span>
+            <strong>1 sec</strong>
+          </div>
+        </article>
+      </section>
+      <section className="panel history-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">EXECUTION LOG</p>
+            <h2>Recent history</h2>
+          </div>
+          <span className="count-label">{history.length} records</span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>TYPE</th>
+                <th>RESULT</th>
+                <th>OPENED</th>
+                <th>CLOSED</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.length ? (
+                history.map((item, index) => (
+                  <tr key={`${item.end_time}-${index}`}>
+                    <td>
+                      <span
+                        className={`trade-type ${item.order_type === "Long" ? "long-text" : "short-text"}`}
+                      >
+                        <i />
+                        {item.order_type}
+                      </span>
+                    </td>
+                    <td className={item.profit >= 0 ? "positive" : "negative"}>
+                      {item.profit >= 0 ? "+" : ""}${formatNumber(item.profit)}
+                    </td>
+                    <td>{formatDate(item.start_time)}</td>
+                    <td>{formatDate(item.end_time)}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="4" className="table-empty">
+                    No closed trades yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <footer>
+        <span>Powered by PPO model</span>
+        <span>MT5 CONNECTED</span>
+      </footer>
+    </main>
+  );
 }
 
-export default App
+export default App;

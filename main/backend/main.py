@@ -1,6 +1,10 @@
+import os
+import sys
 import threading
 from contextlib import asynccontextmanager
 import time
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,7 +16,6 @@ from typing import List
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv
-
 from reinforcement_learning.features import add_features
 from reinforcement_learning.trading_env import BracketTradingEnv
 
@@ -62,9 +65,9 @@ def load_model():
             feature_cols=feature_cols,
         )
 
-    model = PPO.load("model/3_return_70%_1H/ppo_xauusd.zip", device="cpu")
+    model = PPO.load("model/2/ppo.zip", device="cpu")
     vecnorm = VecNormalize.load(
-        "model/3_return_70%_1H/ppo_xauusd_vecnorm.pkl", DummyVecEnv([make_dummy_env]))
+        "model/2/ppo_vecnorm.pkl", DummyVecEnv([make_dummy_env]))
     vecnorm.training = False
     return model, vecnorm, feature_cols
 
@@ -161,7 +164,7 @@ def trade_loop():
                 sl_dist = sl_mults[sl_idx] * atr
                 sl_price = close - dir_sign * sl_dist
                 tp_price = close + dir_sign * tp_mults[tp_idx] * sl_dist
-                place_order(dir_sign, sl_price, tp_price, lot=0.1)
+                place_order(dir_sign, sl_price, tp_price, lot=0.5)
             else:
                 print("bias is still the same, no change")
         elif direction == 0 and pos != 0:

@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime
-from database import Base
+from .database import Base
 
 class History(Base):
     __tablename__ = "history_trades"
