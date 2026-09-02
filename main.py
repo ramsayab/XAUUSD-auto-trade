@@ -138,5 +138,6 @@ while True:
     print(f"\n\n\n\n\n\nCurrent position: {pos}")
     print(f"Current equity: {mt5.account_info().balance}")
     print("=" * 25)
-    sleep(5)
+    sleep(1)
+
 mt5.shutdown()

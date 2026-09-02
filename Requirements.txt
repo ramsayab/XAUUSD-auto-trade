@@ -3,3 +3,5 @@ stable-baselines3
 pandas
 numpy
 matplotlib
+MetaTrader5
+fastapi
