@@ -15,7 +15,7 @@ Eksperimen sistem automated trading untuk instrumen **XAUUSD** menggunakan reinf
 
 ## Hasil training dan backtesting
 
-Skrip `reinforcement_learning/train.py` membuat grafik berikut setelah proses training dan evaluasi selesai. Letakkan file hasilnya di `model/3/` agar gambar tampil di halaman README.
+berikut grafik evaluasi proses training dan testing.
 
 ### Training equity
 
