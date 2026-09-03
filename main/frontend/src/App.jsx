@@ -57,6 +57,7 @@ function App() {
   }, [loadDashboard]);
 
   const profit = position?.profit ?? 0;
+  const hasPosition = Boolean(position?.order_type);
   const isLong = position?.order_type === "Long";
 
   return (
@@ -81,24 +82,26 @@ function App() {
         <article className="stat-card accent-card">
           <span>ACCOUNT BALANCE</span>
           <strong>
-            {position ? `$${formatNumber(position.balance)}` : "--"}
+            {position?.balance !== null && position?.balance !== undefined
+              ? `$${formatNumber(position.balance)}`
+              : "--"}
           </strong>
           <small>MT5 account</small>
         </article>
         <article className="stat-card">
           <span>OPEN P&amp;L</span>
           <strong className={profit >= 0 ? "positive" : "negative"}>
-            {position
+            {hasPosition
               ? `${profit >= 0 ? "+" : ""}$${formatNumber(profit)}`
               : "--"}
           </strong>
-          <small>{position ? "Current position" : "No open position"}</small>
+          <small>{hasPosition ? "Current position" : "No open position"}</small>
         </article>
         <article className="stat-card">
           <span>ACTIVE SIDE</span>
           <strong>{position?.order_type || "FLAT"}</strong>
           <small>
-            {position
+            {hasPosition
               ? `${formatNumber(position.lot)} lot`
               : "Waiting for signal"}
           </small>
@@ -109,9 +112,9 @@ function App() {
           <div className="panel-heading">
             <div>
               <p className="eyebrow">CURRENT POSITION</p>
-              <h2>{position ? "XAUUSD position" : "No active position"}</h2>
+              <h2>{hasPosition ? "XAUUSD position" : "No active position"}</h2>
             </div>
-            {position && (
+            {hasPosition && (
               <span className={`side-pill ${isLong ? "long" : "short"}`}>
                 {isLong ? "LONG" : "SHORT"}
               </span>
@@ -119,7 +122,7 @@ function App() {
           </div>
           {loading ? (
             <div className="empty-state">Loading market data...</div>
-          ) : position ? (
+          ) : hasPosition ? (
             <div className="position-details">
               <div className="price-block">
                 <span>UNREALIZED PROFIT</span>

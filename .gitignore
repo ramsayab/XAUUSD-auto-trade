@@ -4,9 +4,5 @@
 /data
 __pycache__
 *.csv
-*.png
-*.zip
 *.pyc
-*.pkl
-*.txt
 *.db

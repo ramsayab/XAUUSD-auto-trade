@@ -15,6 +15,8 @@ from trading_env import BracketTradingEnv
 
 DATA_PATH = ["data/XAUUSD_2004-2022.csv", "data/XAUUSD_2023-2026.csv"]
 DECISION_TIMEFRAME = "15min"
+SL_ATR_MULTIPLIERS = (0.5, 0.75, 1.0)
+TP_R_MULTIPLIERS = (0.5, 0.75, 1.0, 1.5)
 RISK_FRACTION = 0.005
 TRAIN_FRACTION = 0.8
 TOTAL_TIMESTEPS = 1_000_000
@@ -47,6 +49,8 @@ def make_env(decision_df, execution_df, feature_cols, randomize_start=False):
         execution_df=execution_df,
         feature_cols=feature_cols,
         risk_fraction=RISK_FRACTION,
+        sl_atr_multipliers=SL_ATR_MULTIPLIERS,
+        tp_r_multipliers=TP_R_MULTIPLIERS,
         randomize_start=randomize_start,
         initial_equity=INITIAL_EQUITY,
         max_episode_steps=EPISODE_STEPS if randomize_start else None,
@@ -124,7 +128,7 @@ def main():
     model = PPO(
         "MlpPolicy", train_vec, device="cpu", verbose=1, seed=42,
         learning_rate=6e-5, gamma=0.99, gae_lambda=0.95,
-        clip_range=0.1, ent_coef=0.02, n_steps=EPISODE_STEPS,
+        clip_range=0.1, ent_coef=0.03, n_steps=EPISODE_STEPS,
         batch_size=1024, n_epochs=5, target_kl=0.025,
         policy_kwargs={
             "net_arch": [256, 128],
@@ -132,13 +136,15 @@ def main():
         },
     )
     model.learn(total_timesteps=TOTAL_TIMESTEPS)
-    model.save("model/ppo_xauusd")
-    train_vec.save("model/ppo_xauusd_vecnorm.pkl")
+    model.save("model/ppo")
+    train_vec.save("model/ppo_vecnorm.pkl")
 
     print("Evaluating the training split...")
     train_eval_raw = CaptureEpisode(BracketTradingEnv(
         train_df, train_exec, feature_cols,
         risk_fraction=RISK_FRACTION,
+        sl_atr_multipliers=SL_ATR_MULTIPLIERS,
+        tp_r_multipliers=TP_R_MULTIPLIERS,
     ))
     train_eval_vec = VecNormalize(
         DummyVecEnv([lambda: train_eval_raw]),
@@ -153,6 +159,8 @@ def main():
     test_raw = CaptureEpisode(BracketTradingEnv(
         test_features, test_execution, feature_cols,
         risk_fraction=RISK_FRACTION,
+        sl_atr_multipliers=SL_ATR_MULTIPLIERS,
+        tp_r_multipliers=TP_R_MULTIPLIERS,
     ))
     test_vec = VecNormalize(
         DummyVecEnv([lambda: Monitor(test_raw)]),

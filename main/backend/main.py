@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,9 +29,13 @@ create_tables()
 state = {"running": True,
          "entry_time": datetime.now()}
 
+DECISION_TIMEFRAME = mt5.TIMEFRAME_M15
+SL_ATR_MULTIPLIERS = (0.5, 0.75, 1.0)
+TP_R_MULTIPLIERS = (0.5, 0.75, 1.0, 1.5)
+
 """"""
 def get_candles():
-    data = pd.DataFrame(mt5.copy_rates_from_pos("XAUUSD", mt5.TIMEFRAME_H1, 0, 500))
+    data = pd.DataFrame(mt5.copy_rates_from_pos("XAUUSD", DECISION_TIMEFRAME, 0, 500))
     data["volume"] = data["tick_volume"]
     data.drop(columns=["real_volume", "spread", "tick_volume"], inplace=True)
     data['time'] = pd.to_datetime(data['time'], unit="s")
@@ -63,11 +68,15 @@ def load_model():
             decision_df=dummy_decision,
             execution_df=dummy_exec,
             feature_cols=feature_cols,
+            sl_atr_multipliers=SL_ATR_MULTIPLIERS,
+            tp_r_multipliers=TP_R_MULTIPLIERS,
         )
 
-    model = PPO.load("model/2/ppo.zip", device="cpu")
+    model = PPO.load(os.path.join(PROJECT_ROOT, "model", "3", "ppo.zip"), device="cpu")
     vecnorm = VecNormalize.load(
-        "model/2/ppo_vecnorm.pkl", DummyVecEnv([make_dummy_env]))
+        os.path.join(PROJECT_ROOT, "model", "3", "ppo_vecnorm.pkl"),
+        DummyVecEnv([make_dummy_env]),
+    )
     vecnorm.training = False
     return model, vecnorm, feature_cols
 
@@ -154,22 +163,22 @@ def trade_loop():
     
         pos = get_current_pos()
         if direction != 0:
-            sl_mults = (1.0, 1.5, 2.0)
-            tp_mults = (1.0, 1.5, 2.0, 3.0)
             atr = float(df_feat.iloc[-1]["atr"])
             close = float(df_feat.iloc[-1]["Close"])
             dir_sign = 1 if direction == 1 else -1
             if pos != dir_sign:
                 close_position()
-                sl_dist = sl_mults[sl_idx] * atr
+                sl_dist = SL_ATR_MULTIPLIERS[sl_idx] * atr
                 sl_price = close - dir_sign * sl_dist
-                tp_price = close + dir_sign * tp_mults[tp_idx] * sl_dist
+                tp_price = close + dir_sign * TP_R_MULTIPLIERS[tp_idx] * sl_dist
                 place_order(dir_sign, sl_price, tp_price, lot=0.5)
             else:
                 print("bias is still the same, no change")
         elif direction == 0 and pos != 0:
             close_position()
-        time.sleep(1)
+
+        print(f"direction: {direction}")
+        time.sleep(3)
 
 
 
@@ -196,14 +205,17 @@ app.add_middleware(
 @app.get("/current_pos")
 def get_pos():
     pos = mt5.positions_get(symbol="XAUUSD")
-    if not pos: return None
+    account = mt5.account_info()
+    balance = account.balance if account else None
+    if not pos:
+        return {"balance": balance}
     return {
         "lot": pos[0].volume,
         "entry_price": pos[0].price_open,
         "current_price": pos[0].price_current,
         "profit": pos[0].profit,
         "order_type": "Long" if pos[0].type == mt5.POSITION_TYPE_BUY else "Short",
-        "balance": mt5.account_info().balance
+        "balance": balance
     }
 
 @app.get("/history_pos", response_model=List[schemas.HistoryResponse])
