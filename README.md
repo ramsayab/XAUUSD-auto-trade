@@ -13,11 +13,7 @@ An automated trading system for the **XAUUSD** instrument using reinforcement le
 
 ## Training and Backtesting Results
 
-<<<<<<< HEAD
 The following charts show the evaluation results for the training and testing processes.
-=======
-berikut grafik evaluasi proses training dan testing.
->>>>>>> fc6edff450e12d0ed454adb9d6ae63a1f72de8f7
 
 ### Training Equity
 
