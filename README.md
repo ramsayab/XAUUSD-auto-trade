@@ -1,58 +1,56 @@
 # XAUUSD Auto Trade
 
-Eksperimen sistem automated trading untuk instrumen **XAUUSD** menggunakan reinforcement learning dengan algoritma PPO (_Proximal Policy Optimization_). Proyek ini mencakup environment simulasi, proses training dan backtesting, integrasi MetaTrader 5, REST API FastAPI, serta dashboard React untuk memantau posisi dan riwayat transaksi.
+An automated trading system for the **XAUUSD** instrument using reinforcement learning with the PPO (_Proximal Policy Optimization_) algorithm. This project includes a simulation environment, training and backtesting workflows, MetaTrader 5 integration, a FastAPI REST API, and a React dashboard for monitoring positions and transaction history.
 
 > [!WARNING]
-> **Jangan gunakan akun asli atau dana nyata. Gunakan akun demo saja.** Proyek ini bersifat eksperimental dan **bukan nasihat keuangan atau rekomendasi investasi**. Trading memiliki risiko kehilangan sebagian atau seluruh modal. Model dapat menghasilkan sinyal yang salah, gagal menghadapi kondisi pasar baru, atau mengeksekusi order dengan hasil yang berbeda dari simulasi.
+> **Do not use a live account or real funds. Use a demo account only.** This project is experimental and **is not financial advice or an investment recommendation**. Trading carries the risk of losing some or all of your capital. The model may generate incorrect signals, fail to handle new market conditions, or execute orders with results that differ from the simulation.
 >
-> Sebelum menjalankan kode, pastikan MetaTrader 5 terhubung ke **akun demo**, izin trading dan ukuran lot sudah diperiksa, dan sistem selalu diawasi. Pengguna bertanggung jawab penuh atas konfigurasi MetaTrader 5, kredensial akun, keputusan untuk mengaktifkan eksekusi order, serta seluruh kerugian, gangguan, atau masalah lain yang timbul dari penggunaan kode ini. Pemilik repository dan kontributor tidak menjamin profitabilitas, ketersediaan, akurasi, atau keamanan sistem.
+> Before running the code, make sure MetaTrader 5 is connected to a **demo account**, trading permissions and lot sizes have been checked, and the system is continuously monitored. Users are fully responsible for their MetaTrader 5 configuration, account credentials, the decision to enable order execution, and any losses, interruptions, or other issues arising from the use of this code. The repository owner and contributors do not guarantee the system's profitability, availability, accuracy, or security.
 
-### Video demo
+### Demo video
 
-<video src="https://github.com/user-attachments/assets/aac38bc7-0ba6-4b77-9803-018029225a6a" controls muted autoplay loop playsinline width="100%">
-	Browser Anda tidak mendukung pemutaran video langsung. [Buka video demo](https://github.com/user-attachments/assets/aac38bc7-0ba6-4b77-9803-018029225a6a).
-</video>
+<video src="https://github.com/user-attachments/assets/aac38bc7-0ba6-4b77-9803-018029225a6a" controls muted autoplay loop playsinline width="100%"></video>
 
-## Hasil training dan backtesting
+## Training and Backtesting Results
 
-Skrip `reinforcement_learning/train.py` membuat grafik berikut setelah proses training dan evaluasi selesai. Letakkan file hasilnya di `model/3/` agar gambar tampil di halaman README.
+The following charts show the evaluation results for the training and testing processes.
 
-### Training equity
+### Training Equity
 
 ![Training equity curve](model/3/train_equity.png)
 
-### Testing equity
+### Testing Equity
 
 ![Testing equity curve](model/3/test_equity.png)
 
-### Trade duration
+### Trade Duration
 
 ![Trade duration distribution](model/3/trade_durations.png)
 
-ROI training yang jauh lebih tinggi karena mencakup 19 tahun (`2004-2022`), sedangkan testing mencakup 4 tahun (`2023-2026`). Karena itu, ROI training merupakan return kumulatif dari periode dan peluang trade yang lebih banyak, sehingga tidak dapat disimpulkan kalau model overfitting.
+The much higher training ROI is due to its coverage of 19 years (`2004-2022`), while testing covers 4 years (`2023-2026`). Therefore, the training ROI is a cumulative return over a longer period with more trading opportunities, so it cannot be concluded that the model is overfitting.
 
-Grafik tersebut adalah visualisasi hasil eksperimen, bukan jaminan performa masa depan. Interpretasikan bersama metrik, biaya transaksi, spread, slippage, dan kondisi data yang digunakan.
+These charts visualize experimental results and are not a guarantee of future performance. Interpret them together with the metrics, transaction costs, spread, slippage, and the conditions of the data used.
 
-## Fitur
+## Features
 
-- Feature engineering pada data OHLCV, termasuk indikator ATR dan fitur historis.
-- Environment trading berbasis Gymnasium dengan stop-loss dan take-profit otomatis.
-- Training PPO dengan Stable-Baselines3 dan normalisasi observasi menggunakan `VecNormalize`.
-- Evaluasi pada data training, validation, dan test yang dipisahkan berdasarkan waktu.
-- Eksekusi order XAUUSD melalui MetaTrader 5 dengan stop-loss berbasis ATR multiplier (`0.5`, `0.75`, atau `1.0`) dan take-profit berbasis target R (`0.5`, `0.75`, `1.0`, atau `1.5`). Nilainya dihitung saat posisi baru dibuka berdasarkan ATR terbaru.
-- Reversal otomatis: jika model memprediksi arah yang berlawanan dengan posisi aktif, posisi lama segera ditutup lalu posisi baru dibuka dengan arah dan SL/TP hasil prediksi terbaru, tanpa menunggu SL atau TP posisi lama terkena.
-- Backend FastAPI untuk status posisi dan riwayat posisi yang sudah ditutup.
-- Dashboard React/Vite yang melakukan refresh data secara berkala.
+- Feature engineering on OHLCV data, including the ATR indicator and historical features.
+- A Gymnasium-based trading environment with automatic stop-loss and take-profit.
+- PPO training with Stable-Baselines3 and observation normalization using `VecNormalize`.
+- Evaluation on training, validation, and test data split chronologically.
+- XAUUSD order execution through MetaTrader 5 with an ATR-multiplier-based stop-loss (`0.5`, `0.75`, or `1.0`) and an R-target-based take-profit (`0.5`, `0.75`, `1.0`, or `1.5`). Values are calculated when a new position is opened using the latest ATR.
+- Automatic reversal: if the model predicts a direction opposite to the active position, the old position is closed immediately and a new position is opened with the direction and SL/TP from the latest prediction, without waiting for the old position's SL or TP to be hit.
+- A FastAPI backend for position status and the history of closed positions.
+- A React/Vite dashboard that refreshes data periodically.
 
-### Mekanisme posisi dan reversal
+### Position and Reversal Mechanism
 
-Model menghasilkan tiga komponen aksi: arah (`0` = flat, `1` = long, `2` = short), indeks SL, dan indeks TP. Untuk posisi baru, jarak SL dihitung sebagai `SL multiplier × ATR`, sedangkan jarak TP dihitung sebagai `TP R multiplier × jarak SL`. Pada backend, model dievaluasi setiap 3 detik. Jika hasilnya berlawanan dengan posisi aktif, sistem mencoba menutup posisi tersebut terlebih dahulu, kemudian mengirim order baru dengan volume `0.5` lot.
+The model produces three action components: direction (`0` = flat, `1` = long, `2` = short), the SL index, and the TP index. For a new position, the SL distance is calculated as `SL multiplier × ATR`, while the TP distance is calculated as `TP R multiplier × SL distance`. In the backend, the model is evaluated every 3 seconds. If the result is opposite to the active position, the system first attempts to close that position, then sends a new order with a volume of `0.5` lots.
 
-SL/TP adalah level perlindungan dan target yang dipasang saat order dikirim, bukan jaminan harga eksekusi. Spread, slippage, koneksi, penolakan broker, atau perubahan harga dapat menyebabkan hasil aktual berbeda dari perhitungan model.
+SL/TP are protective and target levels set when the order is sent, not guarantees of execution prices. Spread, slippage, connectivity issues, broker rejection, or price changes may cause actual results to differ from the model's calculations.
 
-## Arsitektur singkat
+## Brief Architecture
 
-**Alur training**
+**Training flow**
 
 ```
 Data CSV  →  Feature engineering  →  Trading environment  →  PPO training & backtesting
@@ -60,7 +58,7 @@ Data CSV  →  Feature engineering  →  Trading environment  →  PPO training 
                                                              Model (PPO + VecNormalize)
 ```
 
-**Alur trading (runtime)**
+**Trading flow (runtime)**
 
 ```
 Model  ─────────────────────────────────────────────────────────┐
@@ -69,18 +67,18 @@ MetaTrader 5 (data harga XAUUSD)  →  FastAPI backend & trading loop  →  Reac
 MetaTrader 5 (eksekusi order)     ←─────────────────────────────┘
 ```
 
-Alur training menggunakan data CSV untuk membentuk fitur, menjalankan simulasi, melatih PPO, dan menghasilkan model. Saat mode trading dijalankan, backend memuat model tersebut, mengambil data XAUUSD dari MetaTrader 5, mengirim order berdasarkan prediksi model, dan menyediakan status posisi serta riwayat transaksi untuk dashboard.
+The training flow uses CSV data to generate features, run simulations, train PPO, and produce a model. When trading mode is running, the backend loads the model, retrieves XAUUSD data from MetaTrader 5, sends orders based on the model's predictions, and provides position status and transaction history to the dashboard.
 
-## Persyaratan
+## Requirements
 
-- Windows dengan Python `>= 3.12` untuk backend.
-- MetaTrader 5 desktop yang terpasang dan dapat diakses oleh package Python `MetaTrader5`.
-- Node.js dan npm untuk frontend.
-- Akun **demo** broker yang mendukung simbol `XAUUSD` untuk menguji integrasi. Nama simbol dapat berbeda menurut broker.
+- Windows with Python `>= 3.12` for the backend.
+- MetaTrader 5 desktop installed and accessible through the `MetaTrader5` Python package.
+- Node.js and npm for the frontend.
+- A broker **demo** account that supports the `XAUUSD` symbol for testing the integration. The symbol name may vary by broker.
 
-## Instalasi
+## Installation
 
-Dari direktori root repository:
+From the repository root directory:
 
 ```powershell
 python -m venv .venv
@@ -98,20 +96,19 @@ npm install
 cd ../..
 ```
 
-Pastikan terminal MetaTrader 5 sudah terbuka dan **akun demo** sudah dipilih sebelum menjalankan kode yang memanggil API MT5. Jangan memasukkan kredensial akun ke source code atau repository.
+Make sure the MetaTrader 5 terminal is open and a **demo account** is selected before running code that calls the MT5 API. Do not put account credentials in the source code or repository.
 
-## Struktur direktori
+## Directory Structure
 
 ```text
 .
-├── data/                       # Dataset candle XAUUSD
 ├── main/
-│   ├── backend/                # FastAPI, database, dan runner trading
-│   └── frontend/               # Dashboard React/Vite
-├── model/                      # Model PPO dan VecNormalize
-├── notebooks/                  # Eksplorasi data dan eksperimen model
-├── reinforcement_learning/    # Feature engineering, environment, training
-├── main_terminal_only.py       # Runner trading terminal mandiri
-├── Requirements.txt            # Dependensi utama Python
+│   ├── backend/                # FastAPI, database, and trading runner
+│   └── frontend/               # React/Vite dashboard
+├── model/                      # PPO and VecNormalize models
+├── notebooks/                  # Data exploration and model experiments
+├── reinforcement_learning/    # Feature engineering, environment, and training
+├── main_terminal_only.py       # Standalone terminal trading runner
+├── Requirements.txt            # Main Python dependencies
 └── README.md
 ```
