@@ -44,7 +44,7 @@ These charts visualize experimental results and are not a guarantee of future pe
 
 ### Position and Reversal Mechanism
 
-The model produces three action components: direction (`0` = flat, `1` = long, `2` = short), the SL index, and the TP index. For a new position, the SL distance is calculated as `SL multiplier × ATR`, while the TP distance is calculated as `TP R multiplier × SL distance`. In the backend, the model is evaluated every 3 seconds. If the result is opposite to the active position, the system first attempts to close that position, then sends a new order with a volume of `0.5` lots.
+The model produces three action components: direction (`0` = flat, `1` = long, `2` = short), the SL index, and the TP index. For a new position, the SL distance is calculated as `SL multiplier × ATR`, while the TP distance is calculated as `TP R multiplier × SL distance`. In the backend, the model is evaluated every 3 seconds. If the result is opposite to the active position, the system first attempts to close that position, then sends a new order.
 
 SL/TP are protective and target levels set when the order is sent, not guarantees of execution prices. Spread, slippage, connectivity issues, broker rejection, or price changes may cause actual results to differ from the model's calculations.
 
